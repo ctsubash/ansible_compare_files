@@ -1,0 +1,38 @@
+---
+- name: Compare contents of two files without diff
+  hosts: all
+  become: yes
+  tasks:
+    - name: Read content of file1
+      slurp:
+        path: /home/ansible/chatgpt/file1
+      register: file1_content
+
+    - name: Read content of file2
+      slurp:
+        path: /home/ansible/chatgpt/file2
+      register: file2_content
+
+    - name: Convert file1 content to string
+      set_fact:
+        file1_text: "{{ file1_content.content | b64decode }}"
+
+    - name: Convert file2 content to string
+      set_fact:
+        file2_text: "{{ file2_content.content | b64decode }}"
+
+    - name: Create lines list for file1
+      set_fact:
+        file1_lines: "{{ file1_text.splitlines() }}"
+
+    - name: Create lines list for file2
+      set_fact:
+        file2_lines: "{{ file2_text.splitlines() }}"
+
+    - name: Find differences between file1 and file2
+      set_fact:
+        differences: "{{ file1_lines | difference(file2_lines) }}"
+
+    - name: Display differences
+      debug:
+        msg: "{{ differences }}"
