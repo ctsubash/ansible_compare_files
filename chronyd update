@@ -1,0 +1,50 @@
+To add a dependency to start the chronyd service only after the network is online, we need to add or modify the After=network-online.target and Wants=network-online.target directives in the [Unit] section of the chronyd.service file.
+
+Here’s an updated Ansible playbook to make this modification:
+
+---
+- name: Update the chronyd systemd service file to start after network is online
+  hosts: all
+  become: yes
+  tasks:
+    - name: Check if the chronyd service file exists
+      stat:
+        path: /usr/lib/systemd/system/chronyd.service
+      register: chronyd_service_file
+
+    - name: Add After=network-online.target to the Unit section
+      when: chronyd_service_file.stat.exists
+      lineinfile:
+        path: /usr/lib/systemd/system/chronyd.service
+        regexp: '^After='
+        line: 'After=network-online.target'
+        insertafter: '\[Unit\]'
+      notify: restart chronyd service
+
+    - name: Add Wants=network-online.target to the Unit section
+      when: chronyd_service_file.stat.exists
+      lineinfile:
+        path: /usr/lib/systemd/system/chronyd.service
+        regexp: '^Wants='
+        line: 'Wants=network-online.target'
+        insertafter: '\[Unit\]'
+      notify: restart chronyd service
+
+  handlers:
+    - name: restart chronyd service
+      systemd:
+        name: chronyd
+        state: restarted
+      daemon_reload: yes
+      when: chronyd_service_file.stat.exists
+
+Explanation
+
+    After=network-online.target: Ensures that the chronyd service starts only after the network is online.
+    Wants=network-online.target: Adds a soft dependency on network-online.target, meaning systemd will try to start network-online.target before starting chronyd.
+    insertafter: '[Unit]': Ensures these lines are added within the [Unit] section of the chronyd.service file.
+
+After running this playbook, the handler will reload the systemd configuration and restart the chronyd service to apply the changes.
+
+
+Chat
