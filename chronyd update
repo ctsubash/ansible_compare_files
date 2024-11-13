@@ -6,36 +6,59 @@ Here’s an updated Ansible playbook to make this modification:
 - name: Update the chronyd systemd service file to start after network is online
   hosts: all
   become: yes
-  pre_tasks:
-    - name: Fail if OS is not RHEL 7 or 8
-      ansible.builtin.assert:
-        that:
-          - ansible_distribution == "RedHat"
-          - ansible_distribution_major_version in ['7', '8']
-        msg: "This playbook only supports RHEL 7 or 8."
-
+  gather_facts: false
   tasks:
+    - name: Gather only distribution facts
+      setup:
+        gather_subset:
+          - "distribution"
+      register: distribution_facts
+
+    - name: Fail if OS is not RHEL 7 or 8
+      fail:
+        msg: "This role only supports RHEL 7 or 8."
+      when: 
+        - distribution_facts.ansible_facts.ansible_distribution != "RedHat"
+        - distribution_facts.ansible_facts.ansible_distribution_major_version not in ['7', '8']
+
     - name: Check if the chronyd service file exists
       stat:
         path: /usr/lib/systemd/system/chronyd.service
       register: chronyd_service_file
 
-    - name: Add After=network-online.target to the Unit section
+    - name: Take a backup of the chronyd service file
+      copy:
+        src: /usr/lib/systemd/system/chronyd.service
+        dest: "/tmp/chronyd.service.bak"
+        backup: yes
       when: chronyd_service_file.stat.exists
+
+    - name: Check if 'After=network-online.target' already exists
+      command: grep -q "After=network-online.target" /usr/lib/systemd/system/chronyd.service
+      register: after_exists
+      ignore_errors: yes
+
+    - name: Check if 'Wants=network-online.target' already exists
+      command: grep -q "Wants=network-online.target" /usr/lib/systemd/system/chronyd.service
+      register: wants_exists
+      ignore_errors: yes
+
+    - name: Add After=network-online.target to the Unit section if not present
       lineinfile:
         path: /usr/lib/systemd/system/chronyd.service
         regexp: '^After='
         line: 'After=network-online.target'
         insertafter: '\[Unit\]'
+      when: chronyd_service_file.stat.exists and after_exists.rc != 0
       notify: restart chronyd service
 
-    - name: Add Wants=network-online.target to the Unit section
-      when: chronyd_service_file.stat.exists
+    - name: Add Wants=network-online.target to the Unit section if not present
       lineinfile:
         path: /usr/lib/systemd/system/chronyd.service
         regexp: '^Wants='
         line: 'Wants=network-online.target'
         insertafter: '\[Unit\]'
+      when: chronyd_service_file.stat.exists and wants_exists.rc != 0
       notify: restart chronyd service
 
   handlers:
@@ -44,8 +67,6 @@ Here’s an updated Ansible playbook to make this modification:
         name: chronyd
         state: restarted
       daemon_reload: yes
-      when: chronyd_service_file.stat.exists
-
 
 Explanation
 
