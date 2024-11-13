@@ -6,6 +6,14 @@ Here’s an updated Ansible playbook to make this modification:
 - name: Update the chronyd systemd service file to start after network is online
   hosts: all
   become: yes
+  pre_tasks:
+    - name: Fail if OS is not RHEL 7 or 8
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == "RedHat"
+          - ansible_distribution_major_version in ['7', '8']
+        msg: "This playbook only supports RHEL 7 or 8."
+
   tasks:
     - name: Check if the chronyd service file exists
       stat:
@@ -37,6 +45,7 @@ Here’s an updated Ansible playbook to make this modification:
         state: restarted
       daemon_reload: yes
       when: chronyd_service_file.stat.exists
+
 
 Explanation
 
