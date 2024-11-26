@@ -1,0 +1,141 @@
+To send success/failure details for all servers in a single email using the Ansible Automation Platform, you can utilize the mail module along with task status aggregation using Ansible facts.
+
+Here’s the updated playbook:
+Playbook to Fix RPMDB and Email Results
+
+---
+- name: Fix RPMDB Corruption and Send Email Report
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    rpm_backup_dir: /var/lib/rpm-backup
+    email_recipient: admin@example.com
+    email_sender: ansible@example.com
+  tasks:
+    - name: Initialize result dictionary
+      set_fact:
+        host_results: "{{ host_results | default({}) }}"
+    
+    - name: Check if the RPM database is corrupted
+      shell: |
+        rpm --verify --all
+      register: rpm_verify
+      ignore_errors: true
+      changed_when: false
+
+    - name: Backup the existing RPM database
+      shell: |
+        mkdir -p {{ rpm_backup_dir }} && \
+        cp -a /var/lib/rpm {{ rpm_backup_dir }}
+      register: backup_result
+      ignore_errors: true
+      changed_when: true
+
+    - name: Rebuild the RPM database
+      shell: |
+        rm -f /var/lib/rpm/__db* && \
+        rpm --rebuilddb
+      register: rebuild_result
+      ignore_errors: true
+      changed_when: true
+
+    - name: Verify RPM database integrity after rebuild
+      shell: |
+        rpm --verify --all
+      register: post_rebuild_verify
+      ignore_errors: true
+      changed_when: false
+
+    - name: Aggregate results
+      set_fact:
+        host_results: >-
+          {{
+            host_results | combine({
+              inventory_hostname: {
+                "rpm_verify": rpm_verify,
+                "backup": backup_result,
+                "rebuild": rebuild_result,
+                "post_rebuild": post_rebuild_verify,
+                "status": (
+                  "SUCCESS"
+                  if rpm_verify.rc != 0 and post_rebuild_verify.rc == 0
+                  else "FAILED"
+                )
+              }
+            })
+          }}
+
+  - name: Generate report email body
+    run_once: true
+    delegate_to: localhost
+    set_fact:
+      email_body: >-
+        {% set success_hosts = [] %}
+        {% set failed_hosts = [] %}
+        {% for host, result in host_results.items() %}
+          {% if result.status == "SUCCESS" %}
+            {% set _ = success_hosts.append(host) %}
+          {% else %}
+            {% set _ = failed_hosts.append(host) %}
+          {% endif %}
+        {% endfor %}
+        Report on RPMDB Fix:
+        
+        Successful Hosts:
+        -----------------
+        {% for host in success_hosts %}
+        - {{ host }}
+        {% endfor %}
+        
+        Failed Hosts:
+        -----------------
+        {% for host in failed_hosts %}
+        - {{ host }}
+          Error Details:
+            RPM Verify RC: {{ host_results[host].rpm_verify.rc }}
+            Rebuild RC: {{ host_results[host].rebuild.rc }}
+            Post-Rebuild RC: {{ host_results[host].post_rebuild.rc }}
+        {% endfor %}
+        
+        Total Hosts: {{ host_results | length }}
+        Success: {{ success_hosts | length }}
+        Failures: {{ failed_hosts | length }}
+
+  - name: Send email report
+    mail:
+      host: localhost
+      port: 25
+      from: "{{ email_sender }}"
+      to: "{{ email_recipient }}"
+      subject: RPMDB Fix Report
+      body: "{{ email_body }}"
+
+How It Works:
+
+    Host Results Aggregation:
+        Each host's status (success or failure) is captured and stored in the host_results dictionary.
+        Detailed outputs from commands (rpm_verify, backup, rebuild, post_rebuild) are preserved for reporting.
+
+    Generate an Email Body:
+        A single email body is dynamically generated using the aggregated results.
+        The email includes:
+            List of successful hosts.
+            List of failed hosts with error details.
+            Summary of total hosts, successes, and failures.
+
+    Send Email:
+        The mail module sends the email to a recipient with all results in a consolidated format.
+
+Usage Instructions:
+
+    Replace admin@example.com with the recipient's email address and ansible@example.com with the sender's email.
+    Ensure the managed nodes have an SMTP server configured or accessible for sending emails (or update the mail module configuration with the SMTP server details if required).
+    Run the playbook:
+
+    ansible-playbook -i <inventory_file> fix_rpmdb_with_email.yml
+
+Considerations:
+
+    The mail module requires an SMTP service running on the control node or the specified host in the host field.
+    Customize the email body template as needed for additional details or formatting.
